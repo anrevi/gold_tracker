@@ -84,8 +84,8 @@ class GoldDataFetcher:
             response = self.session.get(url, headers=headers, timeout=15)
             if response.status_code == 200:
                 data = response.json()
-                nav = data.get('priceInfo', {}).get('lastPrice')
-                inav = data.get('priceInfo', {}).get('close')
+                nav = data.get('priceInfo', {}).get('value')
+                inav = data.get('priceInfo', {}).get('iNavValue')
                 if nav:
                     logger.info(f"TATA Gold ETF NAV: ₹{nav}")
                     return float(nav), float(inav) if inav else float(nav)
