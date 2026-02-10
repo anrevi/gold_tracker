@@ -1,0 +1,26 @@
+# Core dependencies
+requests==2.31.0
+python-dotenv==1.0.0
+
+# Data handling
+dataclasses-json==0.6.3
+
+# HTTP and networking
+urllib3==2.1.0
+certifi==2024.2.2
+
+# Optional: For enhanced features
+pandas==2.1.4
+numpy==1.26.3
+
+# Optional: For chart generation (future enhancement)
+matplotlib==3.8.2
+Pillow==10.2.0
+
+# Optional: For database storage (future enhancement)
+# sqlalchemy==2.0.25
+
+# Development dependencies (optional)
+pytest==7.4.4
+black==24.1.1
+flake8==7.0.0
