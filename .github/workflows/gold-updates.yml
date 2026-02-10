@@ -1,0 +1,84 @@
+name: Gold Price Telegram Updates
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual trigger'
+        required: false
+        default: 'Manual update requested'
+  
+  # Scheduled trigger - every 3 minutes during market hours
+  schedule:
+    # Run every 3 minutes from 9 AM to 11:30 PM IST (03:30 to 18:00 UTC)
+    # Note: GitHub Actions schedule runs on UTC
+    - cron: '*/3 3-18 * * 1-5'  # Monday to Friday, every 3 minutes during market hours
+    
+  # Can also be triggered via repository_dispatch for external services
+  repository_dispatch:
+    types: [gold-update]
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  send-gold-update:
+    name: Fetch and Send Gold Updates
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run gold price bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          echo "Starting gold price update..."
+          python gold_telegram_bot.py
+      
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-logs-${{ github.run_number }}
+          path: gold_bot.log
+          retention-days: 7
+      
+      - name: Notify on failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="⚠️ Gold Price Bot Failed - Check GitHub Actions logs" \
+            -d parse_mode="Markdown"
+
+  # Optional: Health check job
+  health-check:
+    name: Bot Health Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    needs: send-gold-update
+    
+    steps:
+      - name: Check bot status
+        run: |
+          echo "Bot executed successfully"
+          echo "Run number: ${{ github.run_number }}"
+          echo "Triggered at: $(date)"
