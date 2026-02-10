@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 TATA Gold ETF – Pre-Market Signal Bot
-Clean trader-style Telegram updates
+Correct iNAV scaling + IST time
 """
 
 import os
@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
+from zoneinfo import ZoneInfo  # Python 3.9+
 
 # ---------------- LOGGING ---------------- #
 logging.basicConfig(
@@ -22,6 +23,8 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+IST = ZoneInfo("Asia/Kolkata")
 
 # ---------------- DATA MODEL ---------------- #
 @dataclass
@@ -49,20 +52,18 @@ class DataFetcher:
             logger.warning(f"Fetch failed: {url} | {e}")
             return None
 
-    # -------- ETF PRICE (YAHOO) -------- #
+    # -------- ETF PRICE (Yahoo) -------- #
     def get_etf_price(self) -> Optional[float]:
         url = "https://query1.finance.yahoo.com/v8/finance/chart/TATAGOLD.NS"
         data = self.fetch_json(url)
         try:
-            price = data["chart"]["result"][0]["meta"]["regularMarketPrice"]
-            return float(price)
+            return float(data["chart"]["result"][0]["meta"]["regularMarketPrice"])
         except Exception:
             return None
 
     # -------- USD INR -------- #
     def get_usd_inr(self) -> float:
-        url = "https://api.exchangerate-api.com/v4/latest/USD"
-        data = self.fetch_json(url)
+        data = self.fetch_json("https://api.exchangerate-api.com/v4/latest/USD")
         try:
             return float(data["rates"]["INR"])
         except Exception:
@@ -70,46 +71,25 @@ class DataFetcher:
 
     # -------- US GOLD -------- #
     def get_us_gold(self) -> float:
-        url = "https://data-asg.goldprice.org/dbXRates/USD"
-        data = self.fetch_json(url)
+        data = self.fetch_json("https://data-asg.goldprice.org/dbXRates/USD")
         try:
             return float(data["items"][0]["xauPrice"])
         except Exception:
             return 2650.0
 
-    # -------- iNAV CALC -------- #
+    # -------- iNAV (CORRECT) -------- #
     def calculate_inav(self, us_gold: float, usd_inr: float) -> float:
-        return round((us_gold * usd_inr) / 31.1035, 2)
+        """
+        1 ETF unit ≈ 0.01 gram of gold
+        """
+        gold_inr_per_gram = (us_gold * usd_inr) / 31.1035
+        return round(gold_inr_per_gram * 0.01, 2)
 
-    # -------- RSI (STATIC SAFE VALUE) -------- #
+    # -------- RSI (PLACEHOLDER) -------- #
     def get_rsi_15m(self) -> float:
-        """
-        Placeholder RSI.
-        Replace with TradingView / broker API later.
-        """
         return 43.5
 
-    # -------- ALL DATA -------- #
-    def fetch_all(self) -> MarketData:
-        data = MarketData()
-        data.timestamp = datetime.now().strftime("%d-%b %H:%M IST")
-
-        data.etf_price = self.get_etf_price()
-        usd_inr = self.get_usd_inr()
-        us_gold = self.get_us_gold()
-
-        if data.etf_price:
-            data.inav = self.calculate_inav(us_gold, usd_inr)
-            data.premium = round(
-                ((data.etf_price - data.inav) / data.inav) * 100, 2
-            )
-
-        data.rsi_15m = self.get_rsi_15m()
-        data.signal = self.generate_signal(data)
-
-        return data
-
-    # -------- SIGNAL ENGINE -------- #
+    # -------- SIGNAL -------- #
     def generate_signal(self, d: MarketData) -> str:
         if d.premium is None or d.rsi_15m is None:
             return "WAIT"
@@ -121,6 +101,24 @@ class DataFetcher:
         else:
             return "HOLD / WAIT"
 
+    # -------- ALL DATA -------- #
+    def fetch_all(self) -> MarketData:
+        d = MarketData()
+        d.timestamp = datetime.now(IST).strftime("%d-%b %H:%M IST")
+
+        d.etf_price = self.get_etf_price()
+        usd_inr = self.get_usd_inr()
+        us_gold = self.get_us_gold()
+
+        if d.etf_price:
+            d.inav = self.calculate_inav(us_gold, usd_inr)
+            d.premium = round(((d.etf_price - d.inav) / d.inav) * 100, 2)
+
+        d.rsi_15m = self.get_rsi_15m()
+        d.signal = self.generate_signal(d)
+
+        return d
+
 # ---------------- TELEGRAM ---------------- #
 class TelegramBot:
 
@@ -128,18 +126,15 @@ class TelegramBot:
         self.url = f"https://api.telegram.org/bot{token}/sendMessage"
         self.chat_id = chat_id
 
-    def send(self, message: str):
-        payload = {
-            "chat_id": self.chat_id,
-            "text": message,
-            "parse_mode": "Markdown"
-        }
-        requests.post(self.url, json=payload, timeout=10)
+    def send(self, text: str):
+        requests.post(
+            self.url,
+            json={"chat_id": self.chat_id, "text": text},
+            timeout=10
+        )
 
     def format_message(self, d: MarketData) -> str:
         return f"""
-🕒 Phase: PRE-MARKET
-
 ETF: ₹{d.etf_price:.2f}
 Fair iNAV: ₹{d.inav:.2f}
 Premium: {d.premium:+.2f}%
@@ -164,10 +159,9 @@ def main():
     bot = TelegramBot(token, chat_id)
 
     data = fetcher.fetch_all()
-    message = bot.format_message(data)
-    bot.send(message)
+    bot.send(bot.format_message(data))
 
-    logger.info("Pre-market update sent successfully")
+    logger.info("Pre-market update sent")
 
 if __name__ == "__main__":
     main()
